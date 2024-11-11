@@ -25,6 +25,7 @@ extern int w_webserver_content_response(bvm *vm);
 extern int w_webserver_content_send_style(bvm *vm);
 extern int w_webserver_content_flush(bvm *vm);
 extern int w_webserver_content_stop(bvm *vm);
+extern int w_webserver_content_close(bvm *vm);
 extern int w_webserver_content_button(bvm *vm);
 
 extern int w_webserver_html_escape(bvm *vm);
@@ -34,6 +35,7 @@ extern int w_webserver_arg(bvm *vm);
 extern int w_webserver_arg_name(bvm *vm);
 extern int w_webserver_has_arg(bvm *vm);
 
+extern int w_webserver_header(bvm *vm);
 
 // To allow a full restart of the Berry VM, we need to supplement the webserver Request Handler
 // model from Arduino framework.
@@ -152,6 +154,7 @@ module webserver (scope: global) {
     content_open, func(w_webserver_content_open)
     content_start, func(w_webserver_content_start)
     content_stop, func(w_webserver_content_stop)
+    content_close, func(w_webserver_content_close)
     content_button, func(w_webserver_content_button)
 
     html_escape, func(w_webserver_html_escape)
@@ -160,6 +163,8 @@ module webserver (scope: global) {
     arg, func(w_webserver_arg)
     arg_name, func(w_webserver_arg_name)
     has_arg, func(w_webserver_has_arg)
+
+    header, func(w_webserver_header)
 }
 @const_object_info_end */
 #include "be_fixed_webserver.h"

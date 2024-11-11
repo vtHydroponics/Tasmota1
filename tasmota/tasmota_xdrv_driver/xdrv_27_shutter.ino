@@ -1,7 +1,7 @@
 /*
   xdrv_27_Shutter.ino - Shutter/Blind support for Tasmota
 
-  Copyright (C) 2023  Stefan Bode
+  Copyright (C) 2023 Stefan Bode
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -52,10 +52,13 @@ int32_t  current_stop_way = 0;
 int32_t  next_possible_stop_position = 0;
 int32_t  current_real_position = 0;
 int32_t  current_pwm_velocity = 0;
+bool     sensor_data_reported = false;
 
 const char HTTP_MSG_SLIDER_SHUTTER[] PROGMEM =
+  "<tr><td colspan=2>"
   "<div><span class='p'>%s</span><span class='q'>%s</span></div>"
-  "<div><input type='range' min='0' max='100' value='%d' onchange='lc(\"u\",%d,value)'></div>";
+  "<div><input type='range' min='0' max='100' value='%d' onchange='lc(\"u\",%d,value)'></div>"
+  "{e}";
 
 const uint8_t MAX_MODES = 8;
 enum Shutterposition_mode {SHT_UNDEF, SHT_TIME, SHT_TIME_UP_DOWN, SHT_TIME_GARAGE, SHT_COUNTER, SHT_PWM_VALUE, SHT_PWM_TIME,SHT_AUTOCONFIG};
@@ -218,7 +221,7 @@ void ShutterRtc50mS(void)
           ShutterUpdateVelocity(i);
           Shutter[i].real_position +=  Shutter[i].direction > 0 ? Shutter[i].pwm_velocity : (Shutter[i].direction < 0 ? -Shutter[i].pwm_velocity : 0);
           Shutter[i].pwm_value = SHT_DIV_ROUND((Settings->shutter_pwmrange[1][i]-Settings->shutter_pwmrange[0][i]) * Shutter[i].real_position , Shutter[i].open_max)+Settings->shutter_pwmrange[0][i];
-          analogWrite(Pin(GPIO_PWM1, i), Shutter[i].pwm_value);
+          AnalogWrite(Pin(GPIO_PWM1, i), Shutter[i].pwm_value);
         break;
 
         case SHT_COUNTER:
@@ -572,7 +575,7 @@ void ShutterDecellerateForStop(uint8_t i)
         while (RtcSettings.pulse_counter[i] < (uint32_t)(Shutter[i].target_position-Shutter[i].start_position)*Shutter[i].direction*ShutterGlobal.open_velocity_max/RESOLUTION/STEPS_PER_SECOND && missing_steps > 0) {
         }
 #ifdef ESP8266
-        analogWrite(Pin(GPIO_PWM1, i), 0); // removed with 8.3 because of reset caused by watchog
+        AnalogWrite(Pin(GPIO_PWM1, i), 0); // removed with 8.3 because of reset caused by watchog
 #endif
 #ifdef ESP32
         TasmotaGlobal.pwm_value[i] = 0;
@@ -629,12 +632,12 @@ void ShutterPowerOff(uint8_t i)
   switch (ShutterGlobal.position_mode) {
     case SHT_PWM_VALUE:
       Shutter[i].pwm_value = SHT_DIV_ROUND((Settings->shutter_pwmrange[1][i]-Settings->shutter_pwmrange[0][i]) * Shutter[i].target_position , Shutter[i].open_max)+Settings->shutter_pwmrange[0][i];
-      analogWrite(Pin(GPIO_PWM1, i), Shutter[i].pwm_value);
+      AnalogWrite(Pin(GPIO_PWM1, i), Shutter[i].pwm_value);
       AddLog(LOG_LEVEL_DEBUG, PSTR("SHT: PWM final %d"),Shutter[i].pwm_value);
       char scmnd[20];
   #ifdef SHUTTER_CLEAR_PWM_ONSTOP
       // free the PWM servo lock on stop.
-      analogWrite(Pin(GPIO_PWM1, i), 0);
+      AnalogWrite(Pin(GPIO_PWM1, i), 0);
   #endif
       break;
   }
@@ -652,7 +655,8 @@ void ShutterWaitForMotorStop(uint8_t i)
 
 void ShutterWaitForMotorStart(uint8_t i)
 {
-  while (millis() < Shutter[i].last_stop_time + Settings->shutter_motorstop) {
+  uint32_t end_time = Shutter[i].last_stop_time + Settings->shutter_motorstop;
+  while (!TimeReached(end_time)) {
     loop();
   }
   //AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("SHT: Stoptime done"));
@@ -729,13 +733,12 @@ void ShutterAllowPreStartProcedure(uint8_t i) {
   // What PreStartProcedure do you want to execute here?
   // Anyway, as long var1 != 99 this is skipped (luckily)
 #ifdef USE_RULES
-  uint32_t uptime_Local=0;
-  AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("SHT: Delay Start? var%d <99>=<%s>, max10s?"),i+1, rules_vars[i]);
-  uptime_Local = TasmotaGlobal.uptime;
-  while (uptime_Local+10 > TasmotaGlobal.uptime && (String)rules_vars[i] == "99") {
-    loop();
+  AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("SHT: Delay Start? var%d <99>=<%s>, max10s?"),i + 1, rules_vars[i]);
+  // wait for response from rules
+  uint32_t end_time = millis() + 10000;
+  while (!TimeReached(end_time) && (String)rules_vars[i] == "99") {
+    delay(1);
   }
-  //AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("SHT: Delay Start. Done"));
 #endif  // USE_RULES
 }
 
@@ -754,7 +757,7 @@ void ShutterStartInit(uint32_t i, int32_t direction, int32_t target_pos)
       case SHT_COUNTER:
 #ifdef ESP8266
         analogWriteFreq(Shutter[i].pwm_velocity);
-        analogWrite(Pin(GPIO_PWM1, i), 0);
+        AnalogWrite(Pin(GPIO_PWM1, i), 0);
 #endif
 #ifdef ESP32
         analogWriteFreq(PWM_MIN,Pin(GPIO_PWM1, i));
@@ -770,6 +773,7 @@ void ShutterStartInit(uint32_t i, int32_t direction, int32_t target_pos)
     Shutter[i].target_position = target_pos;
     Shutter[i].start_position = Shutter[i].real_position;
     TasmotaGlobal.rules_flag.shutter_moving = 1;
+    sensor_data_reported = false;
     ShutterAllowPreStartProcedure(i);
     Shutter[i].time = Shutter[i].last_reported_time = 0;
 
@@ -1090,7 +1094,7 @@ bool ShutterButtonHandler(void)
                 char scommand[CMDSZ];
                 char stopic[TOPSZ];
                 for (uint32_t i = 0; i < MAX_SHUTTERS; i++) {
-                  if ((i==shutter_index) || (Settings->shutter_button[button_index] & (0x01<<30))) {
+                  if ( ((i==shutter_index) || (Settings->shutter_button[button_index] & (0x01<<30))) && 0 == (Settings->shutter_options[i] & 2) ) {
                     snprintf_P(scommand, sizeof(scommand),PSTR("ShutterPosition%d"), i+1);
                     GetGroupTopic_P(stopic, scommand, SET_MQTT_GRP_TOPIC);
                     Response_P("%d", position);
@@ -1135,12 +1139,6 @@ void ShutterToggle(bool dir)
     XdrvMailbox.data_len = 0;
     TasmotaGlobal.last_source = SRC_WEBGUI;
     CmndShutterPosition();
-  }
-}
-
-void ShutterShow(){
-  for (uint32_t i = 0; i < TasmotaGlobal.shutters_present; i++) {
-    WSContentSend_P(HTTP_MSG_SLIDER_SHUTTER,  (Settings->shutter_options[i] & 1) ? D_OPEN : D_CLOSE,(Settings->shutter_options[i] & 1) ? D_CLOSE : D_OPEN, (Settings->shutter_options[i] & 1) ? (100 - ShutterRealToPercentPosition(-9999, i)) : ShutterRealToPercentPosition(-9999, i), i+1);
   }
 }
 
@@ -1294,11 +1292,15 @@ void CmndShutterPosition(void)
       }
 
       // value 0 with data_len > 0 can mean Open
-      // special handling fo UP,DOWN,TOGGLE,STOP command comming with payload -99
-      // STOP will come with payload 0 because predefined value in TASMOTA
-      if ((XdrvMailbox.data_len > 3) && (XdrvMailbox.payload <= 0)) {
-        // set len to 0 to avoid loop on close where payload is 0
-        XdrvMailbox.data_len = 0;
+      // special handling fo UP,DOWN,TOGGLE,STOP and similar commands command 
+      // 
+      if ( XdrvMailbox.data_len > 0 ) {
+        // set len to 0 to avoid loop 
+        uint32_t data_len_save = XdrvMailbox.data_len;
+        int32_t  payload_save  = XdrvMailbox.payload;
+        XdrvMailbox.data_len   = 0;
+        XdrvMailbox.payload    = -99;
+	      
         if (!strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_UP) || !strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_OPEN) || ((Shutter[index].direction==0) && !strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_STOPOPEN))) {
           CmndShutterOpen();
           return;
@@ -1316,19 +1318,19 @@ void CmndShutterPosition(void)
           return;
         }
         if (!strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_STOP) || ((Shutter[index].direction) && (!strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_STOPOPEN) || !strcasecmp(XdrvMailbox.data,D_CMND_SHUTTER_STOPCLOSE)))) {
-          // Back to normal: all -99 if not a clear position
-          XdrvMailbox.payload = -99;
           CmndShutterStop();
           return;
         }
+        // restore values
+        XdrvMailbox.payload  = payload_save;
+        XdrvMailbox.data_len = data_len_save;
       }
 
       int8_t target_pos_percent = (XdrvMailbox.payload < 0) ? (XdrvMailbox.payload == -99 ? ShutterRealToPercentPosition(Shutter[index].real_position, index) : 0) : ((XdrvMailbox.payload > 100) ? 100 : XdrvMailbox.payload);
-      target_pos_percent = ((Settings->shutter_options[index] & 1) && ((SRC_MQTT       != TasmotaGlobal.last_source)
-                                                                    && (SRC_SERIAL     != TasmotaGlobal.last_source)
-                                                                    && (SRC_WEBGUI     != TasmotaGlobal.last_source)
-                                                                    && (SRC_WEBCOMMAND != TasmotaGlobal.last_source)
-                                                                       )) ? 100 - target_pos_percent : target_pos_percent;
+      target_pos_percent = ((Settings->shutter_options[index] & 1) && (    (SRC_SERIAL     != TasmotaGlobal.last_source)
+                                                                        && (SRC_WEBGUI     != TasmotaGlobal.last_source)
+                                                                        && (SRC_WEBCOMMAND != TasmotaGlobal.last_source)
+                                                                      )) ? 100 - target_pos_percent : target_pos_percent;
 	    
       // if position is either 0 or 100 reset the tilt to avoid tilt moving at the end
       if (target_pos_percent ==   0 && ShutterRealToPercentPosition(Shutter[index].real_position, index)  > 0  ) {Shutter[index].tilt_target_pos = Shutter[index].tilt_config[4];}
@@ -1890,6 +1892,7 @@ bool Xdrv27(uint32_t function)
   if (Settings->flag3.shutter_mode) {  // SetOption80 - Enable shutter support
     uint8_t  counter = XdrvMailbox.index==0?1:XdrvMailbox.index;
     uint8_t  counterend = XdrvMailbox.index==0?TasmotaGlobal.shutters_present:XdrvMailbox.index;
+    uint32_t rescue_index    = XdrvMailbox.index;
     int32_t  rescue_payload  = XdrvMailbox.payload;
     uint32_t rescue_data_len = XdrvMailbox.data_len;
     char stemp1[10];
@@ -1913,24 +1916,23 @@ bool Xdrv27(uint32_t function)
           result = DecodeCommand(kShutterCommands, ShutterCommand);
         }
         break;
-        for (uint8_t i = counter; i <= counterend; i++) {
-          XdrvMailbox.index = i;
-          XdrvMailbox.payload = rescue_payload;
-          XdrvMailbox.data_len = rescue_data_len;
-          result = DecodeCommand(kShutterCommands, ShutterCommand);
-        }
-        break;
       case FUNC_JSON_APPEND:
-        for (uint8_t i = 0; i < TasmotaGlobal.shutters_present; i++) {
-          uint8_t position = ShutterRealToPercentPosition(Shutter[i].real_position, i);
-          uint8_t target   = ShutterRealToPercentPosition(Shutter[i].target_position, i);
-          ResponseAppend_P(",");
-          ResponseAppend_P(JSON_SHUTTER_POS, i+1, (Settings->shutter_options[i] & 1) ? 100 - position : position, Shutter[i].direction,(Settings->shutter_options[i] & 1) ? 100 - target : target, Shutter[i].tilt_real_pos );
-#ifdef USE_DOMOTICZ
-          if ((0 == TasmotaGlobal.tele_period) && (0 == i)) {
-             DomoticzSensor(DZ_SHUTTER, position);
+        if (!sensor_data_reported) {
+          sensor_data_reported = true;
+          for (uint8_t i = 0; i < TasmotaGlobal.shutters_present; i++) {
+            uint8_t position = ShutterRealToPercentPosition(Shutter[i].real_position, i);
+            uint8_t target   = ShutterRealToPercentPosition(Shutter[i].target_position, i);
+            ResponseAppend_P(",");
+            ResponseAppend_P(JSON_SHUTTER_POS, i+1, (Settings->shutter_options[i] & 1) ? 100 - position : position, Shutter[i].direction,(Settings->shutter_options[i] & 1) ? 100 - target : target, Shutter[i].tilt_real_pos );
+            if (Shutter[i].direction != 0) {
+              sensor_data_reported = false;
+            }
+  #ifdef USE_DOMOTICZ
+            if ((0 == TasmotaGlobal.tele_period) && (0 == i)) {
+              DomoticzSensor(DZ_SHUTTER, (Settings->shutter_options[i] & 1) ? 100 - position : position);
+            }
+  #endif  // USE_DOMOTICZ
           }
-#endif  // USE_DOMOTICZ
         }
         break;
       case FUNC_SET_POWER:
@@ -1967,12 +1969,13 @@ bool Xdrv27(uint32_t function)
           result = true;
         }
       break;
-#ifdef USE_WEBSERVER
-      case FUNC_WEB_SENSOR:
-        ShutterShow();
+      case FUNC_ACTIVE:
+        result = true;
         break;
-#endif  // USE_WEBSERVER
     }
+    XdrvMailbox.index = rescue_index;
+    XdrvMailbox.payload = rescue_payload;
+    XdrvMailbox.data_len = rescue_data_len;
   }
   return result;
 }

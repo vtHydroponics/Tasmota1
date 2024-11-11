@@ -35,7 +35,8 @@
 void TasDiscoverMessage(void) {
   uint32_t ip_address = (uint32_t)WiFi.localIP();
   char* hostname = TasmotaGlobal.hostname;
-#if defined(ESP32) && CONFIG_IDF_TARGET_ESP32 && defined(USE_ETHERNET)
+//#if defined(ESP32) && CONFIG_IDF_TARGET_ESP32 && defined(USE_ETHERNET)
+#if defined(ESP32) && defined(USE_ETHERNET)
   if (static_cast<uint32_t>(EthernetLocalIP()) != 0) {
     ip_address = (uint32_t)EthernetLocalIP();
     hostname = EthernetHostname();
@@ -327,6 +328,9 @@ bool Xdrv12(uint32_t function) {
       break;
     case FUNC_MQTT_INIT:
       TasDiscoverInit();
+      break;
+    case FUNC_ACTIVE:
+      result = true;
       break;
     }
   }

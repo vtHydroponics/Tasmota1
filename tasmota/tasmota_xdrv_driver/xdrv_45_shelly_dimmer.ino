@@ -277,8 +277,8 @@ bool ShdSerialSend(const uint8_t data[] = nullptr, uint16_t len = 0)
         ShdSerial->flush();
 
         // wait for any response
-        uint32_t snd_time = millis();
-        while (TimePassedSince(snd_time) < SHD_ACK_TIMEOUT)
+        uint32_t snd_time = millis() + SHD_ACK_TIMEOUT;
+        while (!TimeReached(snd_time))
         {
             if (ShdSerialInput())
                 return true;
@@ -664,6 +664,10 @@ void ShdInit(void)
             if (ShdSerial->hardwareSerial())
                 ClaimSerial();
 
+#ifdef ESP32
+            AddLog(LOG_LEVEL_DEBUG, PSTR(SHD_LOGNAME "Serial UART%d"), ShdSerial->getUart());
+#endif
+
             ShdSerial->flush();
 
             ShdResetToAppMode();
@@ -872,6 +876,9 @@ bool Xdrv45(uint32_t function) {
         result = DecodeCommand(kShdCommands, ShdCommand);
         break;
 #endif // SHELLY_CMDS
+      case FUNC_ACTIVE:
+        result = true;
+        break;
     }
   }
 

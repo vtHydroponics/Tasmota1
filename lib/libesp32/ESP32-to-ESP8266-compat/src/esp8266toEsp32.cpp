@@ -323,6 +323,18 @@ int32_t analogAttach(uint32_t pin, bool output_invert) {    // returns ledc chan
   return chan;
 }
 
+void analogDetachAll(void) {
+  for (uint32_t pin = 0; pin < SOC_GPIO_PIN_COUNT; pin++) { 
+    if (pin_to_channel[pin] > 0) {
+#if ESP_IDF_VERSION_MAJOR < 5
+      ledcDetachPin(pin);
+#else
+      ledcDetach(pin);
+#endif
+    }
+  }
+}
+
 extern "C" uint32_t ledcReadFreq2(uint8_t chan) {
 // extern "C" uint32_t __wrap_ledcReadFreq(uint8_t chan) {
   if (chan > MAX_PWMS) {
@@ -340,6 +352,25 @@ uint8_t ledcReadResolution(uint8_t chan) {
   int32_t timer = pwm_timer[chan];
   int32_t res = timer_duty_resolution[timer];
   return res;
+}
+
+int32_t ledcReadDutyResolution(uint8_t pin) {
+  int32_t chan = analogGetChannel2(pin);
+  if (chan >= 0) {
+    return (1 << ledcReadResolution(chan));
+  }
+  return -1;
+}
+
+// Version of ledcRead that works for both Core2 and Core3
+// Return -1 if pin is not configured as PWM
+int32_t ledcRead2(uint8_t pin) {
+  int32_t chan = analogGetChannel2(pin);
+  if (chan >= 0) {
+    uint8_t group=(chan/8), channel=(chan%8);
+    return ledc_get_duty((ledc_mode_t)group, (ledc_channel_t)channel);
+  }
+  return -1;
 }
 
 // void analogWrite(uint8_t pin, int val);

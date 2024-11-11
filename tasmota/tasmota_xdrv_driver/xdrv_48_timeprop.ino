@@ -179,9 +179,6 @@ void CmndSetPower(void) {
       timeprops[XdrvMailbox.index].setPower(newPower, Tprop.current_time_secs );
       ResponseCmndFloat(newPower, 2);
     }
-    else {
-      ResponseCmndError();
-    }
   }
 }
 
@@ -204,9 +201,6 @@ void CmndSetCycleTime(void) {
         Tprop.timeprops[XdrvMailbox.index].initialise(cycleTimes[XdrvMailbox.index], deadTimes[XdrvMailbox.index], opInverts[XdrvMailbox.index], fallbacks[XdrvMailbox.index], maxIntervals[XdrvMailbox.index], Tprop.current_time_secs);
         ResponseCmndNumber(newCycleTime);
       }
-      else {
-        ResponseCmndError();
-      }
     }
     else {
       ResponseCmndNumber(cycleTimes[XdrvMailbox.index]);
@@ -222,9 +216,6 @@ void CmndSetDeadTime(void) {
         deadTimes[XdrvMailbox.index] = newDeadTime;
         Tprop.timeprops[XdrvMailbox.index].initialise(cycleTimes[XdrvMailbox.index], deadTimes[XdrvMailbox.index], opInverts[XdrvMailbox.index], fallbacks[XdrvMailbox.index], maxIntervals[XdrvMailbox.index], Tprop.current_time_secs);
         ResponseCmndNumber(newDeadTime);
-      }
-      else {
-        ResponseCmndError();
       }
     } 
     else {
@@ -256,9 +247,6 @@ void CmndSetFallbackPower(void) {
         Tprop.timeprops[XdrvMailbox.index].initialise(cycleTimes[XdrvMailbox.index], deadTimes[XdrvMailbox.index], opInverts[XdrvMailbox.index], fallbacks[XdrvMailbox.index], maxIntervals[XdrvMailbox.index], Tprop.current_time_secs);
         ResponseCmndFloat(newPower, 2);
       }
-      else {
-        ResponseCmndError();
-      }
     }
     else {
       ResponseCmndFloat(fallbacks[XdrvMailbox.index], 2);
@@ -274,9 +262,6 @@ void CmndSetMaxUpdateInterval(void) {
         maxIntervals[XdrvMailbox.index] = newInterval;
         Tprop.timeprops[XdrvMailbox.index].initialise(cycleTimes[XdrvMailbox.index], deadTimes[XdrvMailbox.index], opInverts[XdrvMailbox.index], fallbacks[XdrvMailbox.index], maxIntervals[XdrvMailbox.index], Tprop.current_time_secs);
         ResponseCmndNumber(newInterval);
-      }
-      else {
-        ResponseCmndError();
       }
     }
     else {
@@ -312,7 +297,7 @@ void ShowValues(void) {
     ResponseAppend_P(PSTR("\"CycleTime\":%d,"),cycleTimes[i]);
     ResponseAppend_P(PSTR("\"DeadTime\":%d,"),deadTimes[i]);
     ResponseAppend_P(PSTR("\"OutputInvert\":%d,"),opInverts[i]);
-    ResponseAppend_P(PSTR("\"FallbackPower\":%.2f,"),fallbacks[i]);
+    ResponseAppend_P(PSTR("\"FallbackPower\":%2_f,"),&fallbacks[i]);
     ResponseAppend_P(PSTR("\"MaxUpdateInterval\":%d"),maxIntervals[i]);
     ResponseAppend_P(i<TIMEPROP_NUM_OUTPUTS-1 ? PSTR("},") : PSTR("}"));
   }
@@ -344,6 +329,9 @@ bool Xdrv48(uint32_t function) {
       break;
     case FUNC_JSON_APPEND:
       ShowValues();
+      break;
+    case FUNC_ACTIVE:
+      result = true;
       break;
   }
   return result;

@@ -122,10 +122,11 @@
 #include "fb_gfx.h"
 #include "camera_pins.h"
 
+SemaphoreHandle_t WebcamMutex = nullptr;
+
+#ifndef USE_WEBCAM_SETUP_ONLY
 bool HttpCheckPriviledgedAccess(bool);
 extern ESP8266WebServer *Webserver;
-
-SemaphoreHandle_t WebcamMutex = nullptr;;
 
 // use mutex like:
 // TasAutoMutex localmutex(&WebcamMutex, "somename");
@@ -134,7 +135,7 @@ SemaphoreHandle_t WebcamMutex = nullptr;;
 #define BOUNDARY "e8b8c539-047d-4777-a985-fbba6edff11e"
 
 #ifndef MAX_PICSTORE
-#define MAX_PICSTORE 4
+  #define MAX_PICSTORE 4
 #endif
 struct PICSTORE {
   uint8_t *buff;
@@ -151,11 +152,14 @@ struct PICSTORE {
 #endif // RTSP_FRAME_TIME
 #endif // ENABLE_RTSPSERVER
 
+#endif //USE_WEBCAM_SETUP_ONLY
+
 struct {
   uint8_t  up = 0;
   uint16_t width;
   uint16_t height;
   uint8_t  stream_active;
+ #ifndef USE_WEBCAM_SETUP_ONLY
   WiFiClient client;
   ESP8266WebServer *CamServer;
   struct PICSTORE picstore[MAX_PICSTORE];
@@ -165,9 +169,10 @@ struct {
   CRtspSession *rtsp_session;
   WiFiClient rtsp_client;
   uint8_t rtsp_start;
+#endif // ENABLE_RTSPSERVER
   OV2640 cam;
   uint32_t rtsp_lastframe_time;
-#endif // ENABLE_RTSPSERVER
+#endif // USE_WEBCAM_SETUP_ONLY
 } Wc;
 
 struct {
@@ -208,16 +213,17 @@ bool WcPinUsed(void) {
 //    }
   }
 
-  AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: i2c_enabled_2: %d"), TasmotaGlobal.i2c_enabled_2);
+  AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: i2c_enabled_2: %d"), TasmotaGlobal.i2c_enabled[1]);
 
   if (!PinUsed(GPIO_WEBCAM_XCLK) || !PinUsed(GPIO_WEBCAM_PCLK) ||
       !PinUsed(GPIO_WEBCAM_VSYNC) || !PinUsed(GPIO_WEBCAM_HREF) ||
-      ((!PinUsed(GPIO_WEBCAM_SIOD) || !PinUsed(GPIO_WEBCAM_SIOC)) && !TasmotaGlobal.i2c_enabled_2)    // preferred option is to reuse and share I2Cbus 2
+      ((!PinUsed(GPIO_WEBCAM_SIOD) || !PinUsed(GPIO_WEBCAM_SIOC)) && !TasmotaGlobal.i2c_enabled[1])    // preferred option is to reuse and share I2Cbus 2
       ) {
         pin_used = false;
   }
   return pin_used;
 }
+
 
 void WcFeature(int32_t value) {
   TasAutoMutex localmutex(&WebcamMutex, "WcFeature");
@@ -252,6 +258,7 @@ void WcFeature(int32_t value) {
   }
   AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: Feature: %d"), value);
 }
+
 
 void WcApplySettings() {
   TasAutoMutex localmutex(&WebcamMutex, "WcApplySettings");
@@ -376,7 +383,7 @@ uint32_t WcSetup(int32_t fsiz) {
     config.pin_href = Pin(GPIO_WEBCAM_HREF);      // HREF_GPIO_NUM;
     config.pin_sccb_sda = Pin(GPIO_WEBCAM_SIOD);  // SIOD_GPIO_NUM; - unset to use shared I2C bus 2
     config.pin_sccb_scl = Pin(GPIO_WEBCAM_SIOC);  // SIOC_GPIO_NUM;
-    if(TasmotaGlobal.i2c_enabled_2){              // configure SIOD and SIOC as SDA,2 and SCL,2
+    if(TasmotaGlobal.i2c_enabled[1]){              // configure SIOD and SIOC as SDA,2 and SCL,2
       config.sccb_i2c_port = 1;                   // reuse initialized bus 2, can be shared now
       if(config.pin_sccb_sda < 0){                // GPIO_WEBCAM_SIOD must not be set to really make it happen
         AddLog(LOG_LEVEL_INFO, PSTR("CAM: Use I2C bus2"));
@@ -493,7 +500,7 @@ uint32_t WcSetup(int32_t fsiz) {
 }
 
 /*********************************************************************************************/
-
+#ifndef USE_WEBCAM_SETUP_ONLY
 int32_t WcSetOptions(uint32_t sel, int32_t value) {
   int32_t res = 0;
   TasAutoMutex localmutex(&WebcamMutex, "WcSetOptions");
@@ -771,7 +778,6 @@ pcopy:
 }
 
 //////////////// Handle authentication /////////////////
-
 
 bool WebcamAuthenticate(void)
 {
@@ -1120,6 +1126,8 @@ void WcShowStream(void) {
   }
 }
 
+#endif // USE_WEBCAM_SETUP_ONLY
+
 void WcInit(void) {
   if (!Settings->webcam_config.data) {
     Settings->webcam_config.stream = 1;
@@ -1138,6 +1146,7 @@ void WcInit(void) {
 /*********************************************************************************************\
  * Commands
 \*********************************************************************************************/
+#ifndef USE_WEBCAM_SETUP_ONLY
 
 #define D_PRFX_WEBCAM "WC"
 #define D_CMND_WC_STREAM "Stream"
@@ -1502,13 +1511,15 @@ void WcStatsShow(void) {
 #endif  // USE_WEBSERVER
 }
 
+#endif //USE_WEBCAM_SETUP_ONLY
+
 /*********************************************************************************************\
  * Interface
 \*********************************************************************************************/
 
 bool Xdrv81(uint32_t function) {
   bool result = false;
-
+  #ifndef USE_WEBCAM_SETUP_ONLY
   switch (function) {
     case FUNC_LOOP:
       WcLoop();
@@ -1533,8 +1544,11 @@ bool Xdrv81(uint32_t function) {
     case FUNC_INIT:
       if(Wc.up == 0) WcSetup(Settings->webcam_config.resolution);
       break;
-
+    case FUNC_ACTIVE:
+      result = true;
+      break;
   }
+  #endif // USE_WEBCAM_SETUP_ONLY
   return result;
 }
 

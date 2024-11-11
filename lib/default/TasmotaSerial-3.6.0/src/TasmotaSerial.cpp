@@ -46,11 +46,12 @@ static uint32_t tasmota_serial_uart_bitmap = 0;      // Assigned UARTs
 
 #endif  // ESP32
 
-TasmotaSerial::TasmotaSerial(int receive_pin, int transmit_pin, int hardware_fallback, int nwmode, int buffer_size) {
+TasmotaSerial::TasmotaSerial(int receive_pin, int transmit_pin, int hardware_fallback, int nwmode, int buffer_size, bool invert) {
   m_valid = false;
   m_hardserial = false;
   m_hardswap = false;
   m_overflow = false;
+  m_invert = invert;
   m_data_bits = 8;
   m_stop_bits = 1;
   m_nwmode = nwmode;
@@ -98,7 +99,7 @@ TasmotaSerial::TasmotaSerial(int receive_pin, int transmit_pin, int hardware_fal
   m_valid = true;
 }
 
-void TasmotaSerial::end(bool turnOffDebug) {
+void TasmotaSerial::end(void) {
 #ifdef ESP8266
   if (m_hardserial) {
 //    Serial.end();  // Keep active for logging
@@ -116,13 +117,15 @@ void TasmotaSerial::end(bool turnOffDebug) {
 #ifdef ESP32
 //  Serial.printf("TSR: Freeing UART%d\n", m_uart);
 
-  TSerial->end(turnOffDebug);
+  TSerial->end();
   bitClear(tasmota_serial_uart_bitmap, m_uart);
 #endif  // ESP32
 }
 
 TasmotaSerial::~TasmotaSerial(void) {
-  end();
+  if (m_valid) {
+    end();
+  }
 }
 
 bool TasmotaSerial::isValidGPIOpin(int pin) {
@@ -135,7 +138,12 @@ bool TasmotaSerial::isValidGPIOpin(int pin) {
 }
 
 void TasmotaSerial::setTransmitEnablePin(int tx_enable_pin) {
+#ifdef ESP8266
+  if ((tx_enable_pin > -1) && (isValidGPIOpin(tx_enable_pin) || (16 == tx_enable_pin))) {
+#endif
+#ifdef ESP32
   if ((tx_enable_pin > -1) && isValidGPIOpin(tx_enable_pin)) {
+#endif
     m_tx_enable_pin = tx_enable_pin;
     pinMode(m_tx_enable_pin, OUTPUT);
     digitalWrite(m_tx_enable_pin, LOW);
@@ -144,9 +152,9 @@ void TasmotaSerial::setTransmitEnablePin(int tx_enable_pin) {
 
 #ifdef ESP32
 bool TasmotaSerial::freeUart(void) {
-  for (uint32_t i = SOC_UART_NUM -1; i >= 0; i--) {
+  for (uint32_t i = SOC_UART_HP_NUM -1; i >= 0; i--) {
     if (0 == bitRead(tasmota_serial_uart_bitmap, i)) {
-      m_uart = i;
+      m_uart = uart_port_t(i);
       bitSet(tasmota_serial_uart_bitmap, m_uart);
       return true;
     }
@@ -155,7 +163,7 @@ bool TasmotaSerial::freeUart(void) {
 }
 
 void TasmotaSerial::Esp32Begin(void) {
-  TSerial->begin(m_speed, m_config, m_rx_pin, m_tx_pin);
+  TSerial->begin(m_speed, m_config, m_rx_pin, m_tx_pin, m_invert);
   // For low bit rate, below 9600, set the Full RX threshold at 10 bytes instead of the default 120
   if (m_speed <= 9600) {
     // At 9600, 10 chars are ~10ms
@@ -219,7 +227,7 @@ bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
     }
 #ifdef ESP8266
     Serial.flush();
-    Serial.begin(speed, (SerialConfig)config);
+    Serial.begin(speed, (SerialConfig)config, SERIAL_FULL, m_tx_pin, m_invert);
     if (m_hardswap) {
       Serial.swap();
     }
@@ -467,6 +475,42 @@ size_t TasmotaSerial::write(uint8_t b) {
   }
   return size;
 }
+
+#ifdef ESP32
+// Add ability to change parity on the fly, for RS-485
+// See https://github.com/arendst/Tasmota/discussions/22272
+int32_t TasmotaSerial::setConfig(uint32_t config) {
+
+  uint32_t data_bits_before = (m_config & 0xc) >> 2;
+  uint32_t parity_before = m_config & 0x3;
+  uint32_t stop_bits_before = (m_config & 0x30) >> 4;
+
+  uint32_t data_bits = (config & 0xc) >> 2;
+  uint32_t parity = config & 0x3;
+  uint32_t stop_bits = (config & 0x30) >> 4;
+
+  esp_err_t err;
+
+  if (data_bits_before != data_bits) {
+    if (err = uart_set_word_length(m_uart, (uart_word_length_t) data_bits)) {
+      return (int32_t) err;
+    }
+  }
+  if (parity_before != parity) {
+    if (err = uart_set_parity(m_uart, (uart_parity_t) parity)) {
+      return (int32_t) err;
+    }
+  }
+  if (stop_bits_before != stop_bits) {
+    if (err = uart_set_stop_bits(m_uart, (uart_stop_bits_t) stop_bits)) {
+      return (int32_t) err;
+    }
+  }
+
+  m_config = config;
+  return 0;   // no error
+}
+#endif
 
 #ifdef ESP8266
 void IRAM_ATTR TasmotaSerial::rxRead(void) {

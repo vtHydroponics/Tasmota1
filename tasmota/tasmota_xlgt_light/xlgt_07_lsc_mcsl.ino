@@ -246,6 +246,7 @@ void LscMcModuleSelected(void) {
 }
 
 #ifdef USE_WEBSERVER
+#ifndef FIRMWARE_MINIMAL
 #ifdef USE_LSC_MCSL_GUI
 
 void LscMcAddFuctionButtons(void) {
@@ -269,7 +270,7 @@ void LscMcAddFuctionButtons(void) {
       WSContentSend_P(PSTR("<td style='width:%d%%'><button onclick='la(\"&lsc=%d\");'>%s</button></td>"),  // &lsc is related to WebGetArg("lsc", tmp, sizeof(tmp));
         100 / cols,
         idx -1,
-        (strlen(GetWebButton(idx))) ? GetWebButton(idx) : itoa(idx, number, 10));
+        (strlen(GetWebButton(idx))) ? HtmlEscape(GetWebButton(idx)).c_str() : itoa(idx, number, 10));
     }
   }
   WSContentSend_P(PSTR("</tr></table>"));
@@ -287,6 +288,7 @@ void LscMcWebGetArg(void) {
 }
 
 #endif  // USE_LSC_MCSL_GUI
+#endif  // not FIRMWARE_MINIMAL
 #endif  // USE_WEBSERVER
 
 
@@ -306,6 +308,7 @@ bool Xlgt07(uint32_t function)
       result = LscMcMultiButtonPressed();
       break;
 #ifdef USE_WEBSERVER
+#ifndef FIRMWARE_MINIMAL
 #ifdef USE_LSC_MCSL_GUI
     case FUNC_WEB_ADD_MAIN_BUTTON:
       LscMcAddFuctionButtons();
@@ -314,6 +317,7 @@ bool Xlgt07(uint32_t function)
       LscMcWebGetArg();
       break;
 #endif  // USE_LSC_MCSL_GUI
+#endif  // not FIRMWARE_MINIMAL
 #endif  // USE_WEBSERVER
     case FUNC_MODULE_INIT:
       LscMcModuleSelected();

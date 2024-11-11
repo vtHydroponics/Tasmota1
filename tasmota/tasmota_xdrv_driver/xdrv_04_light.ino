@@ -29,11 +29,16 @@
  *  3          PWM3       RGB    no         (H801, MagicHome and Arilux LC01)
  *  4          PWM4       RGBW   no         (H801, MagicHome and Arilux)
  *  5          PWM5       RGBCW  yes        (H801, Arilux LC11)
- *  9          reserved          no
- * 10          reserved          yes
+ *  6          PWM6
+ *  7          PWM7
+ *  8          reserved
+ *  9          SERIAL1           no
+ * 10          SERIAL2           yes
  * 11          +WS2812    RGB    no         (One WS2812 RGB or RGBW ledstrip)
  * 12          AiLight    RGBW   no
  * 13          Sonoff B1  RGBCW  yes
+ * 14          reserved
+ * 15          reserved
  *
  * light_scheme  WS2812  3+ Colors  1+2 Colors  Effect
  * ------------  ------  ---------  ----------  -----------------
@@ -1549,6 +1554,9 @@ void LightPreparePower(power_t channels = 0xFFFFFFFF) {    // 1 = only RGB, 2 = 
   #ifdef USE_DOMOTICZ
         DomoticzUpdatePowerState(Light.device + i);
   #endif  // USE_DOMOTICZ
+  #ifdef USE_KNX
+        KnxUpdateLight();
+  #endif
       }
     }
   } else {
@@ -1585,6 +1593,9 @@ void LightPreparePower(power_t channels = 0xFFFFFFFF) {    // 1 = only RGB, 2 = 
 #ifdef USE_DOMOTICZ
     DomoticzUpdatePowerState(Light.device);
 #endif  // USE_DOMOTICZ
+#ifdef USE_KNX
+    KnxUpdateLight();
+#endif
   }
 
   if (Settings->flag3.hass_tele_on_power) {  // SetOption59 - Send tele/%topic%/STATE in addition to stat/%topic%/RESULT
@@ -1777,9 +1788,10 @@ void LightAnimate(void)
   // make sure we update CT range in case SetOption82 was changed
   Light.strip_timer_counter++;
 
-  // set sleep parameter: either settings,
-  // or set a maximum of PWM_MAX_SLEEP if light is on or Fade is running
-  if (Light.power || Light.fade_running) {
+  // Set a maximum sleep of PWM_MAX_SLEEP if Fade is running, or if light is on and
+  // a frequently updating light scheme is in use. This is to allow smooth transitions
+  // between light levels and colors.
+  if ((Settings->light_scheme > LS_POWER && Light.power) || Light.fade_running) {
     if (TasmotaGlobal.sleep > PWM_MAX_SLEEP) {
       sleep_previous = TasmotaGlobal.sleep;     // save previous value of sleep
       TasmotaGlobal.sleep = PWM_MAX_SLEEP;      // set a maximum value (in milliseconds) to sleep to ensure that animations are smooth
@@ -2190,7 +2202,7 @@ void LightSetOutputs(const uint16_t *cur_col_10) {
         // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", i, cur_col);
 #else // ESP32
         if (!Settings->flag4.zerocross_dimmer) {
-          analogWrite(Pin(GPIO_PWM1, i), bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - cur_col : cur_col);
+          AnalogWrite(Pin(GPIO_PWM1, i), bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - cur_col : cur_col);
           // AddLog(LOG_LEVEL_DEBUG_MORE, "analogWrite-%i 0x%03X", bitRead(TasmotaGlobal.pwm_inverted, i) ? Settings->pwm_range - cur_col : cur_col);
         }
 #endif // ESP32
@@ -2411,7 +2423,6 @@ void calcGammaBulbs(uint16_t cur_col_10[5]) {
   if (ChannelCT() >= 0) {
     // Need to compute white_bri10 and ct_10 from cur_col_10[] for compatibility with VirtualCT
     white_bri10 = cur_col_10[cw0] + cur_col_10[cw0+1];
-    ct_10 = changeUIntScale(cur_col_10[cw0+1], 0, white_bri10, 0, 1023);
     if (white_bri10 > 1023) {
       // In white_free_cw mode, the combined brightness of cw and ww may be larger than 1023.
       // This cannot be represented in pwm_ct_mode, so we set the maximum brightness instead.
@@ -3459,17 +3470,20 @@ bool Xdrv04(uint32_t function)
         LightInit();
         break;
 #ifdef USE_LIGHT_ARTNET
-    case FUNC_JSON_APPEND:
-      ArtNetJSONAppend();
-      break;
-    case FUNC_NETWORK_UP:
-      ArtNetFuncNetworkUp();
-      break;
-    case FUNC_NETWORK_DOWN:
-      ArtNetFuncNetworkDown();
-      break;
+      case FUNC_JSON_APPEND:
+        ArtNetJSONAppend();
+        break;
+      case FUNC_NETWORK_UP:
+        ArtNetFuncNetworkUp();
+        break;
+      case FUNC_NETWORK_DOWN:
+        ArtNetFuncNetworkDown();
+        break;
 #endif // USE_LIGHT_ARTNET
-    }
+      case FUNC_ACTIVE:
+        result = true;
+        break;
+   }
   }
   return result;
 }

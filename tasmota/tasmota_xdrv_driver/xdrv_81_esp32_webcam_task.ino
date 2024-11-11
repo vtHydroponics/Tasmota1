@@ -108,8 +108,8 @@ As soon as the screenshare ended, back to 53fps at 30mhz clock.
  *    background(4)
  *     e.g. could be used to read pixels, or change pixels from berry.
 
- * WcMenuvideoon   = turn on video in main menu
- * WcMenuvideooff  = turn off video in main menu
+ * WcMenuvideodisable 0 = turn on video in main menu
+ * WcMenuvideodisable 1 = turn off video in main menu
 
  * WcSetOptionsNN  = call WcSetOptions function with (index, payload).
  *   - can oprate many of the functions above, plus:
@@ -701,7 +701,9 @@ void WcInterrupt(uint32_t state) {
   // Stop camera ISR if active to fix TG1WDT_SYS_RESET
   if (!Wc.up) { return; }
 
-  WcSetStreamserver(state);
+  // why stop/start the server itself here?
+  // stopping the cam interrupt should be enough?
+  //WcSetStreamserver(state);
   if (state) {
     // Re-enable interrupts
     cam_start();
@@ -759,12 +761,12 @@ bool WcPinUsed(void) {
   }
 
 #ifdef WEBCAM_DEV_DEBUG  
-  AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: i2c_enabled_2: %d"), TasmotaGlobal.i2c_enabled_2);
+  AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: i2c_enabled_2: %d"), TasmotaGlobal.i2c_enabled[1]);
 #endif
 
   if (!PinUsed(GPIO_WEBCAM_XCLK) || !PinUsed(GPIO_WEBCAM_PCLK) ||
       !PinUsed(GPIO_WEBCAM_VSYNC) || !PinUsed(GPIO_WEBCAM_HREF) ||
-      ((!PinUsed(GPIO_WEBCAM_SIOD) || !PinUsed(GPIO_WEBCAM_SIOC)) && !TasmotaGlobal.i2c_enabled_2)    // preferred option is to reuse and share I2Cbus 2
+      ((!PinUsed(GPIO_WEBCAM_SIOD) || !PinUsed(GPIO_WEBCAM_SIOC)) && !TasmotaGlobal.i2c_enabled[1])    // preferred option is to reuse and share I2Cbus 2
       ) {
         pin_used = false;
   }
@@ -972,7 +974,7 @@ uint32_t WcSetup(int32_t fsiz) {
     config.pin_href = Pin(GPIO_WEBCAM_HREF);      // HREF_GPIO_NUM;
     config.pin_sccb_sda = Pin(GPIO_WEBCAM_SIOD);  // SIOD_GPIO_NUM; - unset to use shared I2C bus 2
     config.pin_sccb_scl = Pin(GPIO_WEBCAM_SIOC);  // SIOC_GPIO_NUM;
-    if(TasmotaGlobal.i2c_enabled_2){              // configure SIOD and SIOC as SDA,2 and SCL,2
+    if(TasmotaGlobal.i2c_enabled[1]){              // configure SIOD and SIOC as SDA,2 and SCL,2
       config.sccb_i2c_port = 1;                   // reuse initialized bus 2, can be shared now
       if(config.pin_sccb_sda < 0){                // GPIO_WEBCAM_SIOD must not be set to really make it happen
 #ifdef WEBCAM_DEV_DEBUG  
@@ -1589,7 +1591,9 @@ uint32_t WcSetStreamserver(uint32_t flag) {
     WcEndStream();
     return 0; 
   }
-
+#ifdef WEBCAM_DEV_DEBUG  
+  AddLog(LOG_LEVEL_DEBUG, PSTR("WcSetStreamserver %d"), flag);
+#endif
   if (flag) {
     if (!Wc.CamServer) {
       TasAutoMutex localmutex(&WebcamMutex, "HandleWebcamMjpeg", 20000);
@@ -2251,7 +2255,7 @@ void WcShowStream(void) {
       WSContentSend_P(HTTP_WEBCAM_MENUVIDEOCONTROL, "wcinit", "Try WCINIT");
     } else {
       if (Settings->webcam_config.spare15) {
-        WSContentSend_P(HTTP_WEBCAM_MENUVIDEOCONTROL, "wcmenuvideoon", "Turn On Video");
+        WSContentSend_P(HTTP_WEBCAM_MENUVIDEOCONTROL, "wcmenuvideodisable%200", "Turn On Video");
       }
     }
   }
@@ -2260,7 +2264,7 @@ void WcShowStream(void) {
   if (!Settings->webcam_config.spare15 && Settings->webcam_config.stream && Wc.CamServer && Wc.up!=0) {
     // Give the webcam webserver some time to prepare the stream - catch error in JS
     WSContentSend_P(PSTR("<p></p><center><img onerror='setTimeout(()=>{this.src=this.src;},1000)' src='http://%_I:81/stream' alt='Webcam stream' style='width:99%%;'></center><p></p>"),(uint32_t)WiFi.localIP());
-    WSContentSend_P(HTTP_WEBCAM_MENUVIDEOCONTROL, "wcmenuvideooff", "Turn Off Video");
+    WSContentSend_P(HTTP_WEBCAM_MENUVIDEOCONTROL, "wcmenuvideodisable%201", "Turn Off Video");
   }
 }
 
@@ -2331,8 +2335,7 @@ void WcInit(void) {
 #define D_CMND_WC_STARTTASK "Starttask"
 #define D_CMND_WC_STOPTASK "Stoptask"
 
-#define D_CMND_WC_MENUVIDEOOFF "Menuvideooff"
-#define D_CMND_WC_MENUVIDEOON "Menuvideoon"
+#define D_CMND_WC_MENUVIDEODISABLE "MenuVideoDisable"
 
 // for testing to see what happens after cam_stop()
 #define D_CMND_WC_INTERRUPT "Interrupt"
@@ -2363,7 +2366,7 @@ const char kWCCommands[] PROGMEM =  D_PRFX_WEBCAM "|"  // Prefix
   D_CMND_WC_AGC_GAIN "|" D_CMND_WC_GAINCEILING "|" D_CMND_WC_RAW_GMA "|" D_CMND_WC_LENC "|"
   D_CMND_WC_WPC "|" D_CMND_WC_DCW "|" D_CMND_WC_BPC "|" D_CMND_WC_COLORBAR "|" D_CMND_WC_FEATURE "|"
   D_CMND_WC_SETDEFAULTS "|" D_CMND_WC_STATS "|" D_CMND_WC_INIT "|" D_CMND_WC_AUTH "|" D_CMND_WC_CLK "|" 
-  D_CMND_WC_STARTTASK "|" D_CMND_WC_STOPTASK "|" D_CMND_WC_MENUVIDEOOFF "|" D_CMND_WC_MENUVIDEOON "|" 
+  D_CMND_WC_STARTTASK "|" D_CMND_WC_STOPTASK "|" D_CMND_WC_MENUVIDEODISABLE "|" 
   D_CMND_WC_INTERRUPT "|" D_CMND_WC_GETFRAME "|" D_CMND_WC_GETPICSTORE "|" 
 #ifdef USE_WEBCAM_MOTION
   D_CMND_WC_SETMOTIONDETECT "|" D_CMND_WC_GETMOTIONPIXELS "|"
@@ -2385,7 +2388,7 @@ void (* const WCCommand[])(void) PROGMEM = {
   &CmndWebcamGammaCorrect, &CmndWebcamLensCorrect, &CmndWebcamWPC, &CmndWebcamDCW, &CmndWebcamBPC,
   &CmndWebcamColorbar, &CmndWebcamFeature, &CmndWebcamSetDefaults,
   &CmndWebcamStats, &CmndWebcamInit, &CmndWebcamAuth, &CmndWebcamClock,
-  &CmndWebcamStartTask, &CmndWebcamStopTask, &CmndWebcamMenuVideoOff, &CmndWebcamMenuVideoOn,
+  &CmndWebcamStartTask, &CmndWebcamStopTask, &CmndWebcamMenuVideoDisable,
   &CmndWebcamCamStartStop, &CmndWebcamGetFrame, &CmndWebcamGetPicStore,
 #ifdef USE_WEBCAM_MOTION
   &CmndWebcamSetMotionDetect, &CmndWebcamGetMotionPixels, 
@@ -2412,7 +2415,7 @@ void CmndWebcam(void) {
     D_CMND_WC_AGC_GAIN "\":%d,\"" D_CMND_WC_GAINCEILING "\":%d,\"" D_CMND_WC_RAW_GMA "\":%d,\""
     D_CMND_WC_LENC "\":%d,\"" D_CMND_WC_WPC "\":%d,\"" D_CMND_WC_DCW "\":%d,\"" D_CMND_WC_BPC "\":%d,\""
     D_CMND_WC_COLORBAR "\":%d,\"" D_CMND_WC_FEATURE "\":%d,\"" D_CMND_WC_AUTH "\":%d,\"" D_CMND_WC_CLK "\":%d,\""
-    D_CMND_WC_MENUVIDEOOFF "\":%d"
+    D_CMND_WC_MENUVIDEODISABLE "\":%d"
 #ifdef ENABLE_RTSPSERVER
   ",\"" D_CMND_RTSP "\":%d"
 #endif // ENABLE_RTSPSERVER
@@ -2516,8 +2519,7 @@ void CmndWebcamGetPicStore(void) {
     bnum = XdrvMailbox.index;
   }
   if (bnum < 0 || bnum > MAX_PICSTORE) {
-    ResponseCmndError();
-    return;
+    return;  // Command Error
   }
 
   // if given 0, then get frame 1 first, and use frame 1 (the first frame, index 0).
@@ -2613,20 +2615,21 @@ int WebcamSavePic(int append) {
 }
 // "WCSAVEPIC1 /temp.jpg" "WCSAVEPIC2 /temp.jpg"
 void CmdWebcamSavePic(){
-  WebcamSavePic(0)? ResponseCmndDone(): ResponseCmndError();
+  if (WebcamSavePic(0)) {
+    ResponseCmndDone();
+  }    
 }
 // "WCAPPENDPIC1 /temp.jpg" "WCAPPENDPIC2 /temp.jpg"
 void CmdWebcamAppendPic(){
-  WebcamSavePic(1)? ResponseCmndDone(): ResponseCmndError();
+  if (WebcamSavePic(1)) {
+    ResponseCmndDone();
+  }
 }
 
-void CmndWebcamMenuVideoOff(void) {
-  Settings->webcam_config.spare15 = 1;
-  ResponseCmndStateText(Settings->webcam_config.spare15);
-}
-
-void CmndWebcamMenuVideoOn(void) {
-  Settings->webcam_config.spare15 = 0;
+void CmndWebcamMenuVideoDisable(void) {
+  if ((XdrvMailbox.payload >= 0) && (XdrvMailbox.payload <= 1)) {
+    Settings->webcam_config.spare15 = XdrvMailbox.payload;
+  }
   ResponseCmndStateText(Settings->webcam_config.spare15);
 }
 
@@ -3012,7 +3015,10 @@ bool Xdrv99(uint32_t function) {
       WcSetStreamserver(Settings->webcam_config.stream);
       WCStartOperationTask();
       break;
-    case FUNC_SAVE_BEFORE_RESTART: {
+
+    case FUNC_ABOUT_TO_RESTART: {
+      // this code will kill off the cam completely, allowing nice clean restarts
+
       // stop cam clock
 #ifdef WEBCAM_DEV_DEBUG  
       AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: FUNC_SAVE_BEFORE_RESTART"));
@@ -3037,6 +3043,10 @@ bool Xdrv99(uint32_t function) {
       AddLog(LOG_LEVEL_DEBUG, PSTR("CAM: FUNC_SAVE_BEFORE_RESTART after delay"));
 #endif      
     } break;
+
+    case FUNC_ACTIVE:
+      result = true;
+      break;
 
   }
   return result;
